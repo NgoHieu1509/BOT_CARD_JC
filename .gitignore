@@ -1,0 +1,8 @@
+# Ignore Java Card OS build files
+*.class
+*.cap
+*.jca
+*.xml1
+bin/
+build/
+dist/

@@ -1,0 +1,11 @@
+<JavaCardProject name="Bot_card_prj">
+<USER>
+<PKG name="Main" aid="11 22 33 44 55" major="1" minor="0">
+<APPLET aid="11 22 33 44 55 01" instanceaid="" parameter="" authority="" privileges="" index="7856" name="botcard"/>
+</PKG>
+<Libs/>
+</USER>
+<DebugInfo>
+<Protocol name="T01"/>
+</DebugInfo>
+</JavaCardProject>

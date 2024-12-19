@@ -71,11 +71,11 @@ public class botcard extends Applet implements ExtendedLength
 	// PIN management
 	private static OwnerPIN pin; // PIN hien tais
 	private boolean setupDone = false;	
-	private static byte[] currentPinValue = new byte[PIN_MAX_SIZE];
 	
 	/** ghi trang thai dang nhap*/
 	private short loginStatus ;
-	private final static byte[] firstLogin = new byte[]{(byte)0x01};	
+	private final static byte[] firstLogin = new byte[]{(byte)0x01};		
+	private static final byte SEPARATOR = ',';
 	
 	//crypt
 	private AESKey aesKey;
@@ -83,6 +83,12 @@ public class botcard extends Applet implements ExtendedLength
     private RSAPublicKey rsaPublicKey;
     private byte[] RSA_MODULUS;
     private static short LENGTH_BLOCK_AES = (short)32;
+    
+    private byte[] encryptedId;
+    private byte[] encryptedName;
+    private byte[] encryptedDob;
+    private byte[] encryptedAddress;
+    private byte[] encryptednumberPlate;
 
 	/** Tra ve loi 9C0F khi tham so khong hop le */
 	private final static short SW_INVALID_PARAMETER = (short) 0x9C0F;
@@ -132,15 +138,12 @@ public class botcard extends Applet implements ExtendedLength
         generateRSAKeys();
         
 		pin = new OwnerPIN((byte) 3, (byte) PIN_INIT_VALUE.length);
-		pin.update(PIN_INIT_VALUE, (short) 0, (byte) PIN_INIT_VALUE.length);
-		Util.arrayCopy(PIN_INIT_VALUE, (short) 0, currentPinValue, (short) 0, (short) PIN_INIT_VALUE.length);
-		register();
-		
+		pin.update(PIN_INIT_VALUE, (short) 0, (byte) PIN_INIT_VALUE.length);	
 	}
 	
 	public static void install(byte[] bArray, short bOffset, byte bLength) 
 	{
-		new botcard();
+		new botcard().register(bArray, (short) (bOffset + 1), bArray[bOffset]);;
 	}
 	public boolean select() {
 		LogOut();
@@ -173,6 +176,9 @@ public class botcard extends Applet implements ExtendedLength
 		case INS_SETUP:
 			setup(apdu,buf);
 			break;
+		case (byte) 0x70:
+			setupPin(apdu);
+			break;
 		case INS_CREATE_PIN:
 			CreatePIN(apdu,buf);
 			break;
@@ -192,11 +198,10 @@ public class botcard extends Applet implements ExtendedLength
             sendPrivateKey(apdu);
             break;
 		case INS_SET_DATA:
-			apdu.setIncomingAndReceive();
 			setData(apdu);
 			break;
 		case INS_GET_DATA:
-			apdu.setIncomingAndReceive();
+			//getData(apdu);
 			short p1 = buf[ISO7816.OFFSET_P1];
 			switch(p1) {
 				case P1_GET_NAME:
@@ -240,18 +245,32 @@ public class botcard extends Applet implements ExtendedLength
 	
 	
 	private void setup(APDU apdu, byte[] buffer) {
-		short pinOffset = (short)(ISO7816.OFFSET_CDATA + 1);
-		byte currentPinValuelength = buffer[ISO7816.OFFSET_CDATA];
-		byte[] aesKeyBuffer = JCSystem.makeTransientByteArray(LENGTH_BLOCK_AES, JCSystem.CLEAR_ON_RESET); // 256-bit (32 byte)
-        MessageDigest sha = MessageDigest.getInstance(MessageDigest.ALG_SHA, false);
-        sha.doFinal(currentPinValue, (short) 0,currentPinValuelength , aesKeyBuffer, (short) 0);
-
-        aesKey = (AESKey) KeyBuilder.buildKey(KeyBuilder.TYPE_AES, KeyBuilder.LENGTH_AES_128, false);
-        aesKey.setKey(aesKeyBuffer, (short) 0);
-
 		firstLogin[0] = (byte)0x00;
 		setupDone = true;
 	}
+	private void setupPin(APDU apdu) {
+        byte[] buffer = apdu.getBuffer();
+        apdu.setIncomingAndReceive();
+        short pinOffset = ISO7816.OFFSET_CDATA;
+        byte pinLength = buffer[ISO7816.OFFSET_LC];
+
+        if (pinLength <= 0 || pinLength > PIN_MAX_SIZE) {
+            ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
+        }
+
+        pin.update(buffer, pinOffset, pinLength);
+        if (!pin.check(buffer, pinOffset, pinLength)) {
+            ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
+        }
+
+        byte[] aesKeyBuffer = JCSystem.makeTransientByteArray((short) 32, JCSystem.CLEAR_ON_RESET); // 256-bit (32 byte)
+        MessageDigest sha = MessageDigest.getInstance(MessageDigest.ALG_SHA_256, false);
+        sha.doFinal(buffer, pinOffset, pinLength, aesKeyBuffer, (short) 0);
+
+        aesKey = (AESKey) KeyBuilder.buildKey(KeyBuilder.TYPE_AES, KeyBuilder.LENGTH_AES_128, false);
+        aesKey.setKey(aesKeyBuffer, (short) 0); 
+    }
+
 	
 	private void CreatePIN(APDU apdu, byte[] buffer) {
 		/* Kiem tra dang nhap */
@@ -270,7 +289,6 @@ public class botcard extends Applet implements ExtendedLength
 			
 		pin = new OwnerPIN((byte)3, PIN_MAX_SIZE);
 		pin.update(buffer, (short) (ISO7816.OFFSET_CDATA + 1), pinSize);	
-		Util.arrayCopy(buffer, (short) (ISO7816.OFFSET_CDATA + 1), currentPinValue, (short) 0, pinSize);	
 	}
 	
 	private void VerifyPIN(APDU apdu, byte[] buffer) {
@@ -333,7 +351,6 @@ public class botcard extends Applet implements ExtendedLength
 			ISOException.throwIt(SW_AUTH_FAILED);
 		}
 		pin.update(buffer, (short)(ISO7816.OFFSET_CDATA + 1 + pinSize + 1), newPinSize);
-		Util.arrayCopy(buffer, (short) (ISO7816.OFFSET_CDATA + 1 + pinSize + 1), currentPinValue, (short) 0, newPinSize);
 
 		loginStatus = (short) 0x0010;
 	}
@@ -385,12 +402,19 @@ public class botcard extends Applet implements ExtendedLength
 		if (!setupDone) {
 			ISOException.throwIt(SW_SETUP_NOT_DONE); // 
 		}
+		
 		byte[] buffer = apdu.getBuffer();
+		apdu.setIncomingAndReceive();
 		short dataLen = buffer[ISO7816.OFFSET_LC];
 		short curPos = 0;
 		
-		short nextDel = findDelimiter(buffer, (short)ISO7816.OFFSET_CDATA, (short)(ISO7816.OFFSET_CDATA + dataLen), (byte)',');
+		 Util.arrayFillNonAtomic(infoID, (short) 0, (short) infoID.length, (byte) 0);
+		Util.arrayFillNonAtomic(infoName, (short) 0, (short) infoName.length, (byte) 0);
+		Util.arrayFillNonAtomic(infoDob, (short) 0, (short) infoDob.length, (byte) 0);
+		Util.arrayFillNonAtomic(infoAddress, (short) 0, (short) infoAddress.length, (byte) 0);
+		Util.arrayFillNonAtomic(infoNumberPlate, (short) 0, (short) infoNumberPlate.length, (byte) 0);
 		
+		short nextDel = findDelimiter(buffer, (short)ISO7816.OFFSET_CDATA, (short)(ISO7816.OFFSET_CDATA + dataLen), (byte)',');
 		lenID = (short)(nextDel - ISO7816.OFFSET_CDATA);
 		Util.arrayCopy(buffer, (short)ISO7816.OFFSET_CDATA,infoID,(short)0,lenID);
 		
@@ -411,55 +435,40 @@ public class botcard extends Applet implements ExtendedLength
 		nextDel = findDelimiter(buffer, curPos, (short)(ISO7816.OFFSET_CDATA + dataLen), (byte)',');
 		lenAddress = (short)(nextDel - curPos);
 		Util.arrayCopy(buffer, curPos, infoAddress, (short)0, lenAddress);
-		
-		
+						
 		curPos = (short) (nextDel + 1);
 		nextDel = findDelimiter(buffer, curPos, (short)(ISO7816.OFFSET_CDATA + dataLen), (byte)',');
 		lenNumberPlate = (short)(nextDel - curPos);
 		Util.arrayCopy(buffer, curPos, infoNumberPlate, (short)0, lenNumberPlate);
 		
-		byte[] encryptedId = encryptField(infoID, aesKey);
+		encryptedId = encryptField(infoID, aesKey);
 		storeEncryptedField(encryptedId, infoID);
-
-		byte[] encryptedNameId = encryptField(infoName, aesKey);
-		storeEncryptedField(encryptedNameId, infoName);
-
-		byte[] encryptedDob = encryptField(infoDob, aesKey);
-		storeEncryptedField(encryptedDob, infoDob);
-
-		byte[] encryptedAddress = encryptField(infoAddress, aesKey);
-		storeEncryptedField(encryptedAddress, infoAddress);
 		
-		byte[] encryptednumberPlate= encryptField(infoNumberPlate, aesKey);
-		storeEncryptedField(encryptednumberPlate, infoNumberPlate);
+		encryptedName = encryptField(infoName, aesKey);
+		storeEncryptedField(encryptedName, infoName);
 
+		encryptedDob = encryptField(infoDob, aesKey);
+		storeEncryptedField(encryptedDob, infoDob);
+		
+		encryptedAddress = encryptField(infoAddress, aesKey);
+		storeEncryptedField(encryptedAddress, infoAddress);
+				
+		encryptednumberPlate= encryptField(infoNumberPlate, aesKey);
+		storeEncryptedField(encryptednumberPlate, infoNumberPlate);
 	}
-	
 	
 	// dest : Mang chua gia tri, destLength: Do dai mang
-	private void getData(APDU apdu, byte[] dest, short destLength) {
-		byte[] buffer = apdu.getBuffer();
-		
-		byte[] decryptedId = decryptField(aesKey, infoID);
-		byte[] decryptedName = decryptField(aesKey, infoName);
-		byte[] decryptedAddress = decryptField(aesKey, infoAddress);
-		byte[] decryptedDob = decryptField(aesKey, infoDob);
-		byte[] decryptednumberPlate = decryptField(aesKey, infoNumberPlate);
-
-		// Remove trailing zero bytes from each decrypted field
-		decryptedId = removeTrailingZeros(decryptedId);
-		decryptedName = removeTrailingZeros(decryptedName);
-		decryptedAddress = removeTrailingZeros(decryptedAddress);
-		decryptedDob = removeTrailingZeros(decryptedDob);
-		decryptednumberPlate = removeTrailingZeros(decryptednumberPlate);
-		
+	private void getData(APDU apdu,byte[] dest, short destLength) {
+		 byte[] buffer = apdu.getBuffer();
+		 apdu.setIncomingAndReceive();
+		byte[] decryptedData = decryptField(aesKey, dest);
+		byte[] trimmedData = removeTrailingZeros(decryptedData);
+		short trimmedLength = (short) trimmedData.length;
 		apdu.setOutgoing();
-		apdu.setOutgoingLength(destLength);
-		Util.arrayCopy(dest, (short) 0, buffer, (short) 0, destLength);
-		apdu.sendBytes((short) 0, destLength);
-		
+		apdu.setOutgoingLength(trimmedLength);
+		Util.arrayCopy(trimmedData, (short) 0, buffer, (short) 0, trimmedLength);
+		apdu.sendBytes((short) 0, trimmedLength);
 	}
-	
 	private void receiveChunk(APDU apdu) {
         byte[] buffer = apdu.getBuffer();
         short lc = (short) (buffer[ISO7816.OFFSET_LC] & 0xFF); 
@@ -559,7 +568,6 @@ private void sendPublicKey(APDU apdu) {
 		cipher.doFinal(field, (short) 0, (short) field.length, encryptedData, (short) 0);
 		return encryptedData;
 	}
-	
 	private byte[] decryptField(AESKey aesKey, byte[] field) {
 		Cipher cipher = Cipher.getInstance(Cipher.ALG_AES_BLOCK_128_CBC_NOPAD, false);
 		byte[] decryptedField = new byte[field.length];
@@ -567,17 +575,14 @@ private void sendPublicKey(APDU apdu) {
 		cipher.doFinal(field, (short) 0, (short) field.length, decryptedField, (short) 0);
 		return decryptedField;
 	}
-	private byte[] removeTrailingZeros(byte[] data) {
-		short length = 0;
-		// Find the length of the non-zero part of the array
-		for (short i = 0; i < data.length; i++) {
-			if (data[i] != 0) {
-				length = (short) (i + 1);
-			}
-		}
-		byte[] trimmedData = new byte[length];
-		Util.arrayCopy(data, (short) 0, trimmedData, (short) 0, length);
-		return trimmedData;
-	}
 
+	private byte[] removeTrailingZeros(byte[] data) {
+		short i = (short) (data.length - 1);
+			while (i >= 0 && data[i] == (byte) 0x00) {
+				i--;
+			}
+			byte[] trimmedData = new byte[(short) (i + 1)];
+			Util.arrayCopyNonAtomic(data, (short) 0, trimmedData, (short) 0, (short) (i + 1));
+			return trimmedData;
+	}
 }

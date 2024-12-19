@@ -2,6 +2,14 @@
 <prevNodes>
 <jnode>
 <fileName>D:\JavacardPJ\BOT_CARD_JC\src\Main\botcard.java</fileName>
+<line>437</line>
+</jnode>
+<jnode>
+<fileName>D:\JavacardPJ\BOT_CARD_JC\src\Main\botcard.java</fileName>
+<line>80</line>
+</jnode>
+<jnode>
+<fileName>D:\JavacardPJ\BOT_CARD_JC\src\Main\botcard.java</fileName>
 <line>524</line>
 </jnode>
 <jnode>
@@ -148,7 +156,7 @@
 <nextRecord>
 <jnode>
 <fileName>D:\JavacardPJ\BOT_CARD_JC\src\Main\botcard.java</fileName>
-<line>80</line>
+<line>21</line>
 </jnode>
 </nextRecord>
 </jumpRecord>
